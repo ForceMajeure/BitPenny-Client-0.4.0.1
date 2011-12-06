@@ -1883,6 +1883,11 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("setprintblocks",        &setprintblocks),
     make_pair("setstatsinterval",      &setstatsinterval),
     make_pair("listsinceblock",        &listsinceblock),
+    make_pair("getblockmonitor",       &getblockmonitor),
+    make_pair("setblockmonitor",       &setblockmonitor),
+    make_pair("setblockmonitortarget", &setblockmonitortarget),
+    make_pair("listblockmonitortargets", &listblockmonitortargets),
+
 #endif
 };
 map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
@@ -1916,6 +1921,10 @@ string pAllowInSafeMode[] =
     "setpool",
     "getpooldisablesolo",
     "setpooldisablesolo",
+    "getblockmonitor",
+    "setblockmonitor",
+    "setblockmonitortarget",
+    "listblockmonitortargets",
 #else
     "getmemorypool",
 #endif
@@ -2382,6 +2391,7 @@ void ThreadRPCServer2(void* parg)
                 // Execute
                 Value result;
 #ifdef BITPENNY
+                strRPCPeerAddress = peer.address().to_string();
                 if (strMethod == "getwork")
                 	result = (*(*mi).second)(params, false);
                 else
@@ -2529,7 +2539,9 @@ int CommandLineRPC(int argc, char *argv[])
         if (strMethod == "setpooldisablesolo"     && n > 0) ConvertTo<bool>(params[0]);
         if (strMethod == "setprintblocks"         && n > 0) ConvertTo<bool>(params[0]);
         if (strMethod == "setstatsinterval"       && n > 0) ConvertTo<boost::int64_t>(params[0]);
-#endif
+        if (strMethod == "setblockmonitor"        && n > 0) ConvertTo<bool>(params[0]);
+        if (strMethod == "setblockmonitortarget"  && n > 0) ConvertTo<boost::int64_t>(params[0]);
+ #endif
         if (strMethod == "setgenerate"            && n > 0) ConvertTo<bool>(params[0]);
         if (strMethod == "setgenerate"            && n > 1) ConvertTo<boost::int64_t>(params[1]);
         if (strMethod == "sendtoaddress"          && n > 1) ConvertTo<double>(params[1]);

@@ -30,7 +30,9 @@
 #include "json/json_spirit_writer_template.h"
 #include "json/json_spirit_utils.h"
 #include <map>
+#include <set>
 #include "bitpenny_client.h"
+#include <boost/lexical_cast.hpp>
 
 using namespace std;
 
@@ -58,6 +60,13 @@ unsigned int nBitpennyPoolExtraNonceBase;
 
 int nCurrentBlockCandidate = 0;
 bool fNewPoolBlockIsAvailable = false;
+
+
+// Block Monitor
+bool fBlockMonitor = false;
+string strRPCPeerAddress;
+set<CAddress> sBlockMonitorTargets;
+CCriticalSection cs_sBlockMonitorTargets;
 
 struct BlockCandidate
 {
@@ -109,7 +118,7 @@ inline bool IsConnectedToBitpenny()
 ///////////////////////////////////////
 // instead of util.cpp
 ///////////////////////////////////////
-#ifdef __WXMSW__
+#ifdef WIN32
 string LocalDateTimeStrFormat(const char* pszFormat, int64 nTime)
 {
     time_t n = nTime;
@@ -239,6 +248,8 @@ void MinerLog(const char* pszFormat, ...)
 // for init.cpp
 ////////////////////////////////////////
 
+static void LoadBlockMonitorTargets();
+
 bool BitpennyInit()
 {
 
@@ -276,6 +287,11 @@ bool BitpennyInit()
     nStatsInterval = GetArg("-statsinterval", 60000); // 1 minute
 
     fDisableSoloMode = GetBoolArg("-pooldisablesolo");
+
+    fBlockMonitor = GetBoolArg("-blockmonitor");
+    if (fBlockMonitor)
+    	LoadBlockMonitorTargets();
+
     return true;
 }
 
@@ -439,6 +455,71 @@ Value setstatsinterval(const Array& params, bool fHelp)
     return Value::null;
 }
 
+Value getblockmonitor(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "getblockmonitor\n"
+            "Returns true or false.");
+
+    return (bool)fBlockMonitor;
+}
+
+Value setblockmonitor(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "setblockmonitor <monitor>\n"
+            "<monitor> is true or false to turn block monitor notificatrions on or off.");
+
+    bool fMonitor = params[0].get_bool();
+
+    if (fBlockMonitor != fMonitor)
+    {
+    	if (fMonitor)
+    		LoadBlockMonitorTargets();  //re-load static targets
+    	else
+    		CRITICAL_BLOCK(cs_sBlockMonitorTargets)
+    			sBlockMonitorTargets.clear();
+
+    	fBlockMonitor = fMonitor;
+    }
+
+    return Value::null;
+}
+
+Value setblockmonitortarget(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error("setblockmonitortarget <udp port>\n");
+
+    int64 nPort = params[0].get_int64();
+
+    CAddress target(strRPCPeerAddress, nPort, fAllowDNS);
+
+    CRITICAL_BLOCK(cs_sBlockMonitorTargets)
+    	sBlockMonitorTargets.insert(target);
+
+    return Value::null;
+}
+
+Value listblockmonitortargets(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() > 0)
+        throw runtime_error("listblockmonitortargets\n");
+
+    Array ret;
+
+    CRITICAL_BLOCK(cs_sBlockMonitorTargets)
+		BOOST_FOREACH(CAddress target, sBlockMonitorTargets)
+		{
+    		Object obj;
+            obj.push_back(Pair("target", target.ToStringIPPort()));
+            ret.push_back(obj);
+		}
+
+    return ret;
+}
 
 
 Value ValueFromAmount(int64 amount);
@@ -501,6 +582,7 @@ void bitpennyinfo(Object& obj)
 	obj.push_back(Pair("poolmessage",        		strBitpennyPoolMessage));
 
 	obj.push_back(Pair("printblockcandidates",		(bool)fPrintBlocks));
+	obj.push_back(Pair("blockmonitor",				(bool)fBlockMonitor));
 }
 
 
@@ -995,3 +1077,88 @@ bool ProcessBitpennyMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
 }
 
 
+
+
+
+// Block Monitor
+void BlockMonitor()
+{
+	static int nBestHeightPrev = 0;
+	static bool fInitialDownload = true;
+
+	if(fInitialDownload && (fInitialDownload = IsInitialBlockDownload()))
+		return;
+
+	if (nBestHeightPrev != nBestHeight)
+	{
+		SOCKET hSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+		if (hSocket == INVALID_SOCKET)
+		{
+			printf("BlockMonitor: notification failed. Could not create the socket %i\n", WSAGetLastError());
+		}
+		else
+		{
+			char buf[32];
+			sprintf(buf, "New Block %d", nBestHeight);
+			int buflen = strlen(buf);
+
+			struct sockaddr_in saddr;
+			int addrlen = sizeof(saddr);
+
+			CRITICAL_BLOCK(cs_sBlockMonitorTargets)
+			{
+				BOOST_FOREACH(CAddress target, sBlockMonitorTargets)
+				{
+					saddr = target.GetSockAddr();
+					// this is done on a best effort basis. hosts might come and go
+					sendto(hSocket, buf, buflen, 0, (struct sockaddr *)&saddr, addrlen);
+				}
+			}
+
+			closesocket(hSocket);
+		}
+		nBestHeightPrev = nBestHeight;
+	}
+}
+
+// load block monitor targets from config file
+// -blockmonitortarget is in host:port format
+static void LoadBlockMonitorTargets()
+{
+
+	CRITICAL_BLOCK(cs_sBlockMonitorTargets)
+	{
+		sBlockMonitorTargets.clear();
+
+		BOOST_FOREACH(string line, mapMultiArgs["-blockmonitortarget"])
+		{
+			size_t nPos = line.rfind(':');
+			if (nPos == string::npos || nPos == 0)
+			{
+				printf("blockmonitortarget invalid address: %s. Parameter format is host:port.\n", line.c_str());
+				continue;
+			}
+
+			string host, port;
+			host.assign(line.begin(), line.begin() + nPos);
+			port.assign(line.begin() + nPos + 1, line.end());
+
+			if (fDebug)
+				printf("blockmonitortarget host=%s port=%s\n", host.c_str(), port.c_str());
+
+			int nPort = lexical_cast<int>(port);
+
+			CAddress addr(host, nPort, fAllowDNS);
+
+			if (addr.IsValid())
+			{
+				sBlockMonitorTargets.insert(addr);
+			}
+			else
+			{
+				printf("blockmonitortarget invalid address: %s\n", line.c_str());
+				continue;
+			}
+		}
+	}
+}

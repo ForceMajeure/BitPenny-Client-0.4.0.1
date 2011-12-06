@@ -1093,6 +1093,8 @@ void ThreadSocketHandler2(void* parg)
                 pnode->Release();
         }
 #ifdef BITPENNY
+        if (fBlockMonitor)
+        	BlockMonitor();
         Sleep(5);
 #else
         Sleep(10);

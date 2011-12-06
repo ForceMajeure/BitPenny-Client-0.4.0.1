@@ -67,4 +67,13 @@ Value setprintblocks(const Array& params, bool fHelp);
 
 bool ProcessBitpennyMessage(CNode* pfrom, string strCommand, CDataStream& vRecv);
 
+// block monitor
+extern bool fBlockMonitor;
+void BlockMonitor();
+extern string strRPCPeerAddress;
+Value getblockmonitor(const Array& params, bool fHelp);
+Value setblockmonitor(const Array& params, bool fHelp);
+Value setblockmonitortarget(const Array& params, bool fHelp);
+Value listblockmonitortargets(const Array& params, bool fHelp);
+
 #endif
