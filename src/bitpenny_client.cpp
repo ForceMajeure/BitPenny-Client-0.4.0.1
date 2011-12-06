@@ -490,12 +490,24 @@ Value setblockmonitor(const Array& params, bool fHelp)
 
 Value setblockmonitortarget(const Array& params, bool fHelp)
 {
-    if (fHelp || params.size() != 1)
-        throw runtime_error("setblockmonitortarget <udp port>\n");
+    if (fHelp || params.size() < 1 || params.size() > 2)
+        throw runtime_error("setblockmonitortarget [<host>] <udp port>\n");
 
-    int64 nPort = params[0].get_int64();
+    string strHost;
+    int64 nPort;
 
-    CAddress target(strRPCPeerAddress, nPort, fAllowDNS);
+    if (params.size() == 1)
+    {
+    	strHost = strRPCPeerAddress;
+    	nPort = params[0].get_int64();
+    }
+    else
+    {
+    	strHost = params[0].get_str();
+    	nPort = params[1].get_int64();
+    }
+
+    CAddress target(strHost, nPort, fAllowDNS);
 
     CRITICAL_BLOCK(cs_sBlockMonitorTargets)
     	sBlockMonitorTargets.insert(target);

@@ -2540,7 +2540,7 @@ int CommandLineRPC(int argc, char *argv[])
         if (strMethod == "setprintblocks"         && n > 0) ConvertTo<bool>(params[0]);
         if (strMethod == "setstatsinterval"       && n > 0) ConvertTo<boost::int64_t>(params[0]);
         if (strMethod == "setblockmonitor"        && n > 0) ConvertTo<bool>(params[0]);
-        if (strMethod == "setblockmonitortarget"  && n > 0) ConvertTo<boost::int64_t>(params[0]);
+        if (strMethod == "setblockmonitortarget"  && n > 0) ConvertTo<boost::int64_t>(params[n-1]);
  #endif
         if (strMethod == "setgenerate"            && n > 0) ConvertTo<bool>(params[0]);
         if (strMethod == "setgenerate"            && n > 1) ConvertTo<boost::int64_t>(params[1]);
