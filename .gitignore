@@ -9,6 +9,8 @@ src/bitcoind
 *.o
 *.patch
 .bitcoin
+.project
+.cproject
 #compilation and Qt preprocessor part
 *.qm
 Makefile

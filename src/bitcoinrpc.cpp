@@ -27,6 +27,10 @@ typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> SSLStream;
 // a certain size around 145MB.  If we need access to json_spirit outside this
 // file, we could use the compiled json_spirit option.
 
+#ifdef BITPENNY
+#include "bitpenny_client.h"
+#endif
+
 using namespace std;
 using namespace boost;
 using namespace boost::asio;
@@ -159,6 +163,19 @@ Value help(const Array& params, bool fHelp)
 
 Value stop(const Array& params, bool fHelp)
 {
+#ifdef BITPENNY
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "stop\n"
+            "Stop bitpenny server.");
+#ifndef QT_GUI
+    // Shutdown will take long enough that the response should get back
+    CreateThread(Shutdown, NULL);
+    return "bitpenny server stopping";
+#else
+    throw runtime_error("NYI: cannot shut down GUI with RPC command");
+#endif
+#else
     if (fHelp || params.size() != 0)
         throw runtime_error(
             "stop\n"
@@ -169,6 +186,7 @@ Value stop(const Array& params, bool fHelp)
     return "bitcoin server stopping";
 #else
     throw runtime_error("NYI: cannot shut down GUI with RPC command");
+#endif
 #endif
 }
 
@@ -309,10 +327,14 @@ Value getinfo(const Array& params, bool fHelp)
     obj.push_back(Pair("blocks",        (int)nBestHeight));
     obj.push_back(Pair("connections",   (int)vNodes.size()));
     obj.push_back(Pair("proxy",         (fUseProxy ? addrProxy.ToStringIPPort() : string())));
+#ifndef BITPENNY
     obj.push_back(Pair("generate",      (bool)fGenerateBitcoins));
     obj.push_back(Pair("genproclimit",  (int)(fLimitProcessors ? nLimitProcessors : -1)));
+#endif
     obj.push_back(Pair("difficulty",    (double)GetDifficulty()));
+#ifndef BITPENNY
     obj.push_back(Pair("hashespersec",  gethashespersec(params, false)));
+#endif
     obj.push_back(Pair("testnet",       fTestNet));
     obj.push_back(Pair("keypoololdest", (boost::int64_t)pwalletMain->GetOldestKeyPoolTime()));
     obj.push_back(Pair("keypoolsize",   pwalletMain->GetKeyPoolSize()));
@@ -320,6 +342,9 @@ Value getinfo(const Array& params, bool fHelp)
     if (pwalletMain->IsCrypted())
         obj.push_back(Pair("unlocked_until", (boost::int64_t)nWalletUnlockTime));
     obj.push_back(Pair("errors",        GetWarnings("statusbar")));
+#ifdef BITPENNY
+	bitpennyinfo(obj);
+#endif
     return obj;
 }
 
@@ -1598,7 +1623,7 @@ Value validateaddress(const Array& params, bool fHelp)
     return ret;
 }
 
-
+#ifndef BITPENNY
 Value getwork(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() > 1)
@@ -1790,7 +1815,7 @@ Value getmemorypool(const Array& params, bool fHelp)
     }
 }
 
-
+#endif
 
 
 
@@ -1812,9 +1837,11 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("getblocknumber",         &getblocknumber),
     make_pair("getconnectioncount",     &getconnectioncount),
     make_pair("getdifficulty",          &getdifficulty),
+#ifndef BITPENNY
     make_pair("getgenerate",            &getgenerate),
     make_pair("setgenerate",            &setgenerate),
     make_pair("gethashespersec",        &gethashespersec),
+#endif
     make_pair("getinfo",                &getinfo),
     make_pair("getnewaddress",          &getnewaddress),
     make_pair("getaccountaddress",      &getaccountaddress),
@@ -1844,8 +1871,19 @@ pair<string, rpcfn_type> pCallTable[] =
     make_pair("getwork",                &getwork),
     make_pair("listaccounts",           &listaccounts),
     make_pair("settxfee",               &settxfee),
+#ifndef BITPENNY
     make_pair("getmemorypool",          &getmemorypool),
+#endif
     make_pair("listsinceblock",        &listsinceblock),
+#ifdef BITPENNY
+    make_pair("getpool",               &getpool),
+    make_pair("setpool",               &setpool),
+    make_pair("getpooldisablesolo",    &getdisablesolo),
+    make_pair("setpooldisablesolo",    &setdisablesolo),
+    make_pair("setprintblocks",        &setprintblocks),
+    make_pair("setstatsinterval",      &setstatsinterval),
+    make_pair("listsinceblock",        &listsinceblock),
+#endif
 };
 map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
 
@@ -1857,9 +1895,11 @@ string pAllowInSafeMode[] =
     "getblocknumber",  // deprecated
     "getconnectioncount",
     "getdifficulty",
+#ifndef BITPENNY
     "getgenerate",
     "setgenerate",
     "gethashespersec",
+#endif
     "getinfo",
     "getnewaddress",
     "getaccountaddress",
@@ -1871,7 +1911,14 @@ string pAllowInSafeMode[] =
     "walletlock",
     "validateaddress",
     "getwork",
+#ifdef BITPENNY
+    "getpool",
+    "setpool",
+    "getpooldisablesolo",
+    "setpooldisablesolo",
+#else
     "getmemorypool",
+#endif
 };
 set<string> setAllowInSafeMode(pAllowInSafeMode, pAllowInSafeMode + sizeof(pAllowInSafeMode)/sizeof(pAllowInSafeMode[0]));
 
@@ -1948,6 +1995,10 @@ static string HTTPReply(int nStatus, const string& strMsg)
             "Content-Length: %d\r\n"
             "Content-Type: application/json\r\n"
             "Server: bitcoin-json-rpc/%s\r\n"
+#ifdef BITPENNY
+			"x-blocknum: %d\r\n"
+			"x-poolmode: %d\r\n"
+#endif
             "\r\n"
             "%s",
         nStatus,
@@ -1955,6 +2006,10 @@ static string HTTPReply(int nStatus, const string& strMsg)
         rfc1123Time().c_str(),
         strMsg.size(),
         FormatFullVersion().c_str(),
+#ifdef BITPENNY
+		nBestHeight,
+		((fDisableSoloMode || fMiningSolo)? 0 : 1),
+#endif
         strMsg.c_str());
 }
 
@@ -2161,7 +2216,11 @@ void ThreadRPCServer2(void* parg)
     strRPCUserColonPass = mapArgs["-rpcuser"] + ":" + mapArgs["-rpcpassword"];
     if (strRPCUserColonPass == ":")
     {
-        string strWhatAmI = "To use bitcoind";
+#ifdef BITPENNY
+		string strWhatAmI = "To use bitpennyd";
+#else
+		string strWhatAmI = "To use bitcoind";
+#endif
         if (mapArgs.count("-server"))
             strWhatAmI = strprintf(_("To use the %s option"), "\"-server\"");
         else if (mapArgs.count("-daemon"))
@@ -2206,7 +2265,11 @@ void ThreadRPCServer2(void* parg)
     }
 #else
     if (fUseSSL)
+	#ifdef BITPENNY
+        throw runtime_error("-rpcssl=1, but bitpennyd compiled without full openssl libraries.");
+    #else
         throw runtime_error("-rpcssl=1, but bitcoin compiled without full openssl libraries.");
+    #endif
 #endif
 
     loop
@@ -2287,7 +2350,11 @@ void ThreadRPCServer2(void* parg)
             if (valMethod.type() != str_type)
                 throw JSONRPCError(-32600, "Method must be a string");
             string strMethod = valMethod.get_str();
+            #ifdef BITPENNY
+            if (strMethod != "getwork") // getmemorypool is not yet supported by bitpenny client
+            #else
             if (strMethod != "getwork" && strMethod != "getmemorypool")
+            #endif
                 printf("ThreadRPCServer method=%s\n", strMethod.c_str());
 
             // Parse params
@@ -2314,6 +2381,11 @@ void ThreadRPCServer2(void* parg)
             {
                 // Execute
                 Value result;
+#ifdef BITPENNY
+                if (strMethod == "getwork")
+                	result = (*(*mi).second)(params, false);
+                else
+#endif
                 CRITICAL_BLOCK(cs_main)
                 CRITICAL_BLOCK(pwalletMain->cs_wallet)
                     result = (*(*mi).second)(params, false);
@@ -2362,8 +2434,11 @@ Object CallRPC(const string& strMethod, const Array& params)
         throw runtime_error("couldn't connect to server");
 #else
     if (fUseSSL)
-        throw runtime_error("-rpcssl=1, but bitcoin compiled without full openssl libraries.");
-
+    #ifdef BITPENNY
+        throw runtime_error("-rpcssl=1, but bitpenny compiled without full openssl libraries.");
+	#else
+		throw runtime_error("-rpcssl=1, but bitcoin compiled without full openssl libraries.");
+	#endif
     ip::tcp::iostream stream(GetArg("-rpcconnect", "127.0.0.1"), GetArg("-rpcport", "8332"));
     if (stream.fail())
         throw runtime_error("couldn't connect to server");
@@ -2449,6 +2524,12 @@ int CommandLineRPC(int argc, char *argv[])
         //
         // Special case non-string parameter types
         //
+#ifdef BITPENNY
+        if (strMethod == "setpool"                && n > 0) ConvertTo<bool>(params[0]);
+        if (strMethod == "setpooldisablesolo"     && n > 0) ConvertTo<bool>(params[0]);
+        if (strMethod == "setprintblocks"         && n > 0) ConvertTo<bool>(params[0]);
+        if (strMethod == "setstatsinterval"       && n > 0) ConvertTo<boost::int64_t>(params[0]);
+#endif
         if (strMethod == "setgenerate"            && n > 0) ConvertTo<bool>(params[0]);
         if (strMethod == "setgenerate"            && n > 1) ConvertTo<boost::int64_t>(params[1]);
         if (strMethod == "sendtoaddress"          && n > 1) ConvertTo<double>(params[1]);
