@@ -69,7 +69,7 @@ bool ProcessBitpennyMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
 
 // block monitor
 extern bool fBlockMonitor;
-void BlockMonitor();
+void BlockMonitor(const char* msg=NULL);
 extern string strRPCPeerAddress;
 Value getblockmonitor(const Array& params, bool fHelp);
 Value setblockmonitor(const Array& params, bool fHelp);

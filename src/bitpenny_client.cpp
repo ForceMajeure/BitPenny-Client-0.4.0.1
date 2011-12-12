@@ -38,7 +38,7 @@ using namespace std;
 
 string FormatVersion(int nVersion);
 
-int nBitpennyClientVersion = 40000;
+int nBitpennyClientVersion = 40001;
 
 // bitpenny connection details
 bool fBitpennyPoolMode = false;
@@ -358,16 +358,25 @@ static int64 nTimeLastConnectionAttemp = 0;
 
 void CheckPoolConnection()
 {
-
+    static bool fNotified = false;
 	int64 nCurrentTime = GetTime();
 
 	if (pnodeBitpennyHost == NULL || pnodeBitpennyHost->hSocket == INVALID_SOCKET)
 	{
+		// connection to pool was lost while still working on pool block
+		if (fBlockMonitor && !fMiningSolo && !fNotified)
+		{
+				BlockMonitor("Stale Block");
+				fNotified = true;
+		}
+
 		// limit automatic re-connect attempts to once a minute.
 		if (nCurrentTime - nTimeLastConnectionAttemp < 60)
 			return;
 
-		ConnectToPool();
+		if (ConnectToPool())
+			fNotified = false;
+
 		nTimeLastConnectionAttemp = nCurrentTime;
 	}
 }
@@ -385,6 +394,10 @@ static void UsePool(bool fPool)
 	else
 	{
 		DisconnectFromPool();
+
+		// disconnecting from pool but still working on pool block
+		if (fBlockMonitor && !fMiningSolo)
+			BlockMonitor("Stale Block");
 	}
 }
 
@@ -408,7 +421,8 @@ Value setpool(const Array& params, bool fHelp)
             "<use pool> is true or false to turn pooled mining on or off.\n");
 
     bool fPool = params[0].get_bool();
-    UsePool(fPool);
+    if (fPool != fBitpennyPoolMode)
+    	UsePool(fPool);
     return Value::null;
 }
 
@@ -1034,6 +1048,11 @@ bool ProcessBitpennyMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
 
 				if (fPrintBlocks)
 					bc.block.print();
+
+				// we are mining solo. let miner know that pool block is available
+				// helpful for miners using nTime rotation
+				if (fBlockMonitor && fMiningSolo)
+						BlockMonitor("Pool Block");
 			}
 			else
 				printf("Stale block %d from Bitpenny\n", bc.nBlockNumber);
@@ -1093,7 +1112,7 @@ bool ProcessBitpennyMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
 
 
 // Block Monitor
-void BlockMonitor()
+void BlockMonitor(const char *msg)
 {
 	static int nBestHeightPrev = 0;
 	static bool fInitialDownload = true;
@@ -1101,7 +1120,7 @@ void BlockMonitor()
 	if(fInitialDownload && (fInitialDownload = IsInitialBlockDownload()))
 		return;
 
-	if (nBestHeightPrev != nBestHeight)
+	if (nBestHeightPrev != nBestHeight || msg)
 	{
 		SOCKET hSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 		if (hSocket == INVALID_SOCKET)
@@ -1111,8 +1130,14 @@ void BlockMonitor()
 		else
 		{
 			char buf[32];
-			sprintf(buf, "New Block %d", nBestHeight);
-			int buflen = strlen(buf);
+
+			if (msg == NULL)
+			{
+				sprintf(buf, "New Block %d", nBestHeight);
+				msg = buf;
+			}
+
+			int buflen = strlen(msg);
 
 			struct sockaddr_in saddr;
 			int addrlen = sizeof(saddr);
@@ -1123,7 +1148,7 @@ void BlockMonitor()
 				{
 					saddr = target.GetSockAddr();
 					// this is done on a best effort basis. hosts might come and go
-					sendto(hSocket, buf, buflen, 0, (struct sockaddr *)&saddr, addrlen);
+					sendto(hSocket, msg, buflen, 0, (struct sockaddr *)&saddr, addrlen);
 				}
 			}
 
